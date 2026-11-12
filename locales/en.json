@@ -1,0 +1,54 @@
+{
+  "notify": {
+    "title": "Housekeeping",
+    "route_started": "Route assigned: %s houses to clean.",
+    "next_house": "Next stop: %s (%s/%s). GPS set.",
+    "entered": "%s of %s spots still need cleaning.",
+    "spot_clean": "+$%s earned (%s/%s cleaned).",
+    "house_clean": "House is spotless. Use the front door to head to the next one.",
+    "found": "You found %s while cleaning.",
+    "route_done": "Route finished! Collect your wages from the foreman.",
+    "route_done_bonus": "Route finished! +$%s bonus. Collect your wages from the foreman.",
+    "route_quit": "You quit the route. Wages you already earned are kept.",
+    "collected": "Collected $%s in wages.",
+    "left_house": "You left the house. Go back in to finish cleaning."
+  },
+  "error": {
+    "failed": "That didn't work. Try again.",
+    "cancelled": "Cleaning cancelled.",
+    "busy": "You're already cleaning something.",
+    "already_clean": "This spot is already clean.",
+    "already_working": "Finish your current route first.",
+    "no_routes": "There's no work available right now.",
+    "no_wages": "You have no wages to collect.",
+    "not_finished": "Finish cleaning before you leave.",
+    "inventory_full": "You found something but couldn't carry it.",
+    "shell_failed": "The house failed to load. Try again."
+  },
+  "menu": {
+    "title": "Cleaning Foreman",
+    "start": "Start cleaning route",
+    "start_desc": "Get a list of houses to clean",
+    "quit": "Quit current route",
+    "quit_desc": "%s of %s houses done",
+    "collect": "Collect wages",
+    "collect_desc": "$%s waiting for you"
+  },
+  "dialog": {
+    "quit_title": "Quit route?",
+    "quit_body": "You'll keep the wages you've earned so far, but the rest of this route is cancelled."
+  },
+  "target": {
+    "foreman": "Talk to foreman",
+    "enter": "Enter to clean",
+    "leave": "Leave house",
+    "abandon": "Quit route"
+  },
+  "progress": {
+    "cleaning": "%s..."
+  },
+  "blip": {
+    "foreman": "Cleaning Jobs",
+    "house": "Cleaning House"
+  }
+}

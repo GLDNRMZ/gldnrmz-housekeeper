@@ -1,61 +1,48 @@
 # gldnrmz-housekeeper
 
-A housekeeping job script for FiveM QBCore servers built off of qb-houserobbery base. Players can enter houses, clean furniture, and earn money (and potentially loot).
+House cleaning job for Qbox. Talk to the foreman, get a route of houses, clean every spot in each one, then collect your wages.
 
 ## Features
 
-- **House Cleaning Job**: Players can visit various houses to perform cleaning tasks.
-- **Interactive Cleaning**: Uses `ox_target` for interaction with furniture (cabinets, shelves, counters, etc.).
-- **Immersive Animations**: Custom animations/emotes for different cleaning tasks (dusting, sweeping, wiping).
-- **Mess Props**: Visual clutter (mess) appears on furniture that needs cleaning and disappears after cleaning.
-- **Multiple Routes**: Supports multiple cleaning routes (Mirror Park, Vinewood, Paleto, etc.) which can be randomized.
-- **Configurable Payouts & Loot**: Customize payouts and potential loot drops for each type of furniture cleaned.
-- **Optimization**: Uses `ox_lib` and `ox_target` for performance.
-- **Job Foreman**: A dedicated NPC (Foreman) to start routes and collect payments.
+- **Routes**: 16 routes around Los Santos, Paleto and Sandy. A random one is handed out each time, never the same one twice in a row.
+- **Cleaning spots**: 19 spots per house, each with its own animation and synced prop (sponge, broom, mop).
+- **Clutter props**: local-only mess on spots that need cleaning, removed as you clean.
+- **Wages**: banked per character and collected from the foreman. They survive relogs, crashes and restarts.
+- **Loot**: configurable chance to find items or cash on each spot.
+- **Server-authoritative**: the server tracks each player's route and checks the order, the player's position and the clean timer before paying. Spoofed events are rejected and logged through `lib.logger`.
+- **Recovery**: if you die or get moved out mid-house, go back in and continue where you left off. You can quit a route from the foreman or the front door at any time and keep what you've earned.
+- **Clean shutdown**: restarting the resource or logging out removes the shell, zones and props and puts you back outside.
 
 ## Dependencies
 
-- [qb-core](https://github.com/qbcore-framework/qb-core)
+- [qbx_core](https://github.com/Qbox-project/qbx_core)
 - [ox_lib](https://github.com/overextended/ox_lib)
 - [ox_target](https://github.com/overextended/ox_target)
-- [qb-interior](https://github.com/qbcore-framework/qb-interior) (for house shells)
-- [qb-weathersync](https://github.com/qbcore-framework/qb-weathersync) (optional, for syncing weather inside)
-- [interact-sound](https://github.com/plunkettscott/interact-sound) (optional, for door sounds)
-
-## Installation
-
-1. Download the resource and place it in your `resources` folder.
-2. Add `ensure gldnrmz-housekeeper` to your `server.cfg`.
-3. Ensure all dependencies are installed and started before this resource.
+- [ox_inventory](https://github.com/overextended/ox_inventory)
+- [qb-interior](https://github.com/qbcore-framework/qb-interior) (house shell)
+- Optional: interact-sound (door sound) and any weather sync that handles `qb-weathersync:client:DisableSync` / `EnableSync` (Renewed-Weathersync does)
 
 ## Configuration
 
-The `config.lua` file allows you to customize various aspects of the script:
+Everything is in `config.lua`:
 
-- **Config.Routes**: Define the locations of houses to be cleaned. Grouped by routes.
-- **Config.CleaningPayouts**: Set minimum and maximum cash payouts for cleaning different furniture types.
-- **Config.CleaningLoot**: Configure item drops (chance and amount) for cleaning specific furniture types.
-- **Config.DefaultFurniture**: Define the furniture layout, interaction text, and animations for the house interiors.
-- **Config.CleaningDuration**: Time it takes to clean a spot.
-- **Config.StartPed**: Location of the Job Foreman.
+| Setting | What it does |
+| --- | --- |
+| `Config.Foreman` | Foreman model, position, scenario and blip |
+| `Config.CleanDuration` | Time per spot (ms) |
+| `Config.Payout` | Wage range per spot type, payout account and an optional route-completion bonus |
+| `Config.Loot` | Loot table per spot type (`default` covers the rest). Use `item` for items or `account` for money |
+| `Config.Emotes` | Animation and hand prop for each emote name |
+| `Config.Furniture` | Spots inside every house (offsets from the shell origin) |
+| `Config.Routes` | Houses grouped into routes |
+| `Config.FixedRoute` | Always hand out one route instead of a random one |
+| `Config.Debug` | Draw target zones and enable `/housekeeper_offset` |
 
-## Usage
+### Adding a cleaning spot
 
-1. **Go to the Cleaning Foreman**: Look for the "Cleaning Jobs" blip on the map (default location in Config).
-2. **Start Job**: Interact with the foreman (using `ox_target`) and select "Start cleaning route".
-3. **Follow Route**: A house will be assigned and marked on your GPS.
-4. **Enter House**: Go to the assigned house location and use the target eye to enter.
-5. **Clean**: Inside, look for furniture with interaction options (e.g., "Clean cabinet", "Sweep Floor").
-6. **Complete**: Once all spots are cleaned, leave the house. If there are more houses in the route, the next one will be assigned.
-7. **Get Paid**: Return to the foreman and select "Collect payment" to receive your earnings.
+1. Set `Config.Debug = true` and restart.
+2. Start a route, enter a house and stand where the spot should be.
+3. Run `/housekeeper_offset`. It copies a `vec3(...)` to your clipboard.
+4. Add it to `Config.Furniture`.
 
-## Events
-
-- `gldnrmz-housekeeper:client:enterHouse`: Triggered when entering a house.
-- `gldnrmz-housekeeper:client:ResetHouseState`: Resets the house state.
-- `gldnrmz-housekeeper:server:cleanFurniture`: Triggered when a furniture spot is cleaned.
-- `gldnrmz-housekeeper:server:CollectPayment`: Triggered to collect payment.
-
-## Credits
-
-- Author: GLDNRMZ
+Text is in `locales/en.json` (uses `ox:locale`).

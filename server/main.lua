@@ -1,209 +1,300 @@
-local QBCore = exports['qb-core']:GetCoreObject()
+-- Server-authoritative housekeeping job. The client only asks; the server
+-- tracks each player's route and checks position, order and timing before
+-- paying anything.
+local RESOURCE = cache.resource
+local Inventory = exports.ox_inventory
 
--- Runtime house states built from Config.Routes
-local function slugifyLabel(label)
-    if not label or type(label) ~= 'string' then return nil end
-    return label:lower():gsub('%s+', '_'):gsub('[^%w_]', '')
+local TIMING_GRACE = 750 -- ms of network slack allowed when finishing a spot
+local SPOT_COUNT = #Config.Furniture
+local SHELL_OFFSET = vec3(0.0, 0.0, Config.ShellZOffset)
+
+---@class HousekeeperJob
+---@field cid string
+---@field route string
+---@field house integer index into Config.Routes[route]
+---@field inside boolean
+---@field cleaned table<integer, true>
+---@field count integer
+---@field cleaning? { spot: integer, finishAt: integer }
+
+---@type table<integer, HousekeeperJob>
+local jobs = {}
+---@type table<string, string> citizenid -> last route handed out
+local lastRoute = {}
+
+local routeNames = {}
+for name, houses in pairs(Config.Routes) do
+    if #houses > 0 then routeNames[#routeNames + 1] = name end
+end
+table.sort(routeNames)
+
+---------------------------------------------------------------------------
+-- Helpers
+---------------------------------------------------------------------------
+
+local function flag(src, reason)
+    print(('^1[%s]^7 %s (%d) rejected: %s'):format(RESOURCE, GetPlayerName(src) or '?', src, reason))
+    lib.logger(src, 'housekeeper:rejected', reason)
 end
 
-local HouseStates = {}
-local PendingPayouts = {}
+local function notify(src, description, notifyType)
+    TriggerClientEvent('ox_lib:notify', src, {
+        title = locale('notify.title'),
+        description = description,
+        type = notifyType or 'inform',
+    })
+end
 
-local function buildHouseStates()
-    HouseStates = {}
-    local routes = Config.Routes or {}
-    local function addPoints(routeName, points)
-        for _, item in ipairs(points) do
-            local key = slugifyLabel(item.label)
-            if key and not HouseStates[key] then
-                HouseStates[key] = {
-                    label = item.label,
-                    coords = item.coords,
-                    opened = false,
-                    tier = Config.DefaultTier,
-                    route = routeName,
-                    furniture = (function()
-                        local function deepCopy(t)
-                            if type(t) ~= 'table' then return t end
-                            local c = {}
-                            for k, v in pairs(t) do
-                                c[k] = deepCopy(v)
-                            end
-                            return c
-                        end
-                        return deepCopy(Config.DefaultFurniture)
-                    end)(),
-                }
-            end
-        end
-    end
-    -- Include all routes so any random job selection is valid
-    for routeName, points in pairs(routes) do
-        addPoints(routeName, points)
+---@return string?
+local function getCitizenId(src)
+    local player = exports.qbx_core:GetPlayer(src)
+    return player and player.PlayerData.citizenid
+end
+
+local function isNear(src, coords, range)
+    local ped = GetPlayerPed(src)
+    return ped ~= 0 and #(GetEntityCoords(ped) - coords) <= range
+end
+
+local function nearForeman(src)
+    return isNear(src, Config.Foreman.coords.xyz, Config.Foreman.targetDistance + 3.0)
+end
+
+local function roll(range)
+    return math.random(range.min, range.max)
+end
+
+---@param job HousekeeperJob
+local function currentHouse(job)
+    return Config.Routes[job.route][job.house]
+end
+
+-- Wages are banked per character in resource KVP so they survive relogs,
+-- crashes and restarts, and can never be collected by someone else.
+local function wageKey(cid) return ('wages:%s'):format(cid) end
+
+local function getWages(cid)
+    return GetResourceKvpInt(wageKey(cid))
+end
+
+local function setWages(cid, amount)
+    if amount > 0 then
+        SetResourceKvpInt(wageKey(cid), amount)
+    else
+        DeleteResourceKvp(wageKey(cid))
     end
 end
 
-buildHouseStates()
-
--- Functions
-
-local function ResetHouseStateTimer(house)
-    CreateThread(function()
-        local minutes = Config.TimeToCloseDoors or 25
-        Wait(minutes * 60000)
-        HouseStates[house]['opened'] = false
-        for _, v in pairs(HouseStates[house]['furniture']) do
-            v['searched'] = false
-        end
-        TriggerClientEvent('gldnrmz-housekeeper:client:ResetHouseState', -1, house)
-    end)
+local function addWages(cid, amount)
+    if amount > 0 then setWages(cid, getWages(cid) + amount) end
 end
 
--- Callbacks
-
-QBCore.Functions.CreateCallback('gldnrmz-housekeeper:server:GetHouseStates', function(_, cb)
-    cb(HouseStates)
-end)
-
--- Events
-
-RegisterNetEvent('gldnrmz-housekeeper:server:SetBusyState', function(cabin, house, bool)
-    HouseStates[house]['furniture'][cabin]['isBusy'] = bool
-    TriggerClientEvent('gldnrmz-housekeeper:client:SetBusyState', -1, cabin, house, bool)
-end)
-
-RegisterNetEvent('gldnrmz-housekeeper:server:enterHouse', function(house)
-    local src = source
-    if not HouseStates[house]['opened'] then
-        ResetHouseStateTimer(house)
-        TriggerClientEvent('gldnrmz-housekeeper:client:setHouseState', -1, house, true)
+local function pickRoute(cid)
+    if Config.FixedRoute and Config.Routes[Config.FixedRoute] then
+        return Config.FixedRoute
     end
-    TriggerClientEvent('gldnrmz-housekeeper:client:enterHouse', src, house)
-    HouseStates[house]['opened'] = true
-end)
 
--- Cleaning payout when a spot is cleaned
-RegisterNetEvent('gldnrmz-housekeeper:server:cleanFurniture', function(cabin, house)
-    local src = source
-    local player = QBCore.Functions.GetPlayer(src)
-    if not player then return end
-    local spotType = HouseStates[house].furniture[cabin].type
-    local payoutCfg = Config.CleaningPayouts[spotType]
-    local amount = payoutCfg and math.random(payoutCfg.min, payoutCfg.max) or math.random(8, 15)
-    PendingPayouts[src] = (PendingPayouts[src] or 0) + amount
-    if Config.CleaningLoot then
-        local typeCfg = Config.CleaningLoot[spotType]
-        if typeCfg and type(typeCfg) == 'table' then
-            -- Shape 1: explicit loot entries list
-            if typeCfg.loot and type(typeCfg.loot) == 'table' and #typeCfg.loot > 0 then
-                local candidates = {}
-                for _, entry in ipairs(typeCfg.loot) do
-                    local entryChance = (entry.chance or 0)
-                    if math.random(1, 100) <= entryChance then
-                        table.insert(candidates, entry)
-                    end
-                end
-                if #candidates > 0 then
-                    local chosen = candidates[math.random(1, #candidates)]
-                    local amountRange = chosen.amount or { min = 1, max = 1 }
-                    local qty = math.random(amountRange.min, amountRange.max)
-                    player.Functions.AddItem(chosen.item, qty)
-                    TriggerClientEvent('QBCore:Notify', src, ('You found %dx %s while cleaning'):format(qty, chosen.item), 'success')
-                end
-            else
-                -- Shape 2: pooled items with a single chance
-                local chance = typeCfg.chance or 0
-                if math.random(1, 100) <= chance then
-                    local pool = typeCfg.items or {}
-                    if #pool > 0 then
-                        local amountRange = typeCfg.amount or { min = 1, max = 1 }
-                        local item = pool[math.random(1, #pool)]
-                        local qty = math.random(amountRange.min, amountRange.max)
-                        player.Functions.AddItem(item, qty)
-                        TriggerClientEvent('QBCore:Notify', src, ('You found %dx %s while cleaning'):format(qty, item), 'success')
-                    end
-                end
-            end
-        elseif Config.CleaningLoot.default then
-            local lootCfg = Config.CleaningLoot.default
-            local routeName = HouseStates[house] and HouseStates[house].route
-            if routeName and Config.CleaningLoot.routes and Config.CleaningLoot.routes[routeName] then
-                local override = Config.CleaningLoot.routes[routeName]
-                lootCfg = setmetatable(override, { __index = Config.CleaningLoot.default })
-            end
-            local chance = lootCfg.chance or 0
-            if math.random(1, 100) <= chance then
-                local itemsByType = lootCfg.items_by_type or {}
-                local pool = itemsByType[spotType] or {}
-                if #pool > 0 then
-                    local amountRange = lootCfg.amount or { min = 1, max = 1 }
-                    local item = pool[math.random(1, #pool)]
-                    local qty = math.random(amountRange.min, amountRange.max)
-                    player.Functions.AddItem(item, qty)
-                    TriggerClientEvent('QBCore:Notify', src, ('You found %dx %s while cleaning'):format(qty, item), 'success')
-                end
-            end
+    local count = #routeNames
+    if count == 0 then return end
+    if count == 1 then return routeNames[1] end
+
+    local route
+    repeat
+        route = routeNames[math.random(count)]
+    until route ~= lastRoute[cid]
+    return route
+end
+
+---@return string? label
+local function giveLoot(src, spotType)
+    local entries = Config.Loot[spotType] or Config.Loot.default
+    if not entries then return end
+
+    local hits = {}
+    for i = 1, #entries do
+        if math.random(100) <= (entries[i].chance or 0) then
+            hits[#hits + 1] = entries[i]
         end
     end
-    HouseStates[house]['furniture'][cabin]['searched'] = true
-    TriggerClientEvent('gldnrmz-housekeeper:client:setCabinState', -1, house, cabin, true)
-end)
+    if #hits == 0 then return end
 
--- Collect pending payment at mission ped
-RegisterNetEvent('gldnrmz-housekeeper:server:CollectPayment', function()
-    local src = source
-    local player = QBCore.Functions.GetPlayer(src)
-    if not player then return end
-    local pending = PendingPayouts[src] or 0
-    if pending <= 0 then
-        TriggerClientEvent('QBCore:Notify', src, 'No pending payment to collect', 'error')
+    local pick = hits[math.random(#hits)]
+    local count = roll(pick.amount or { min = 1, max = 1 })
+
+    if pick.account then
+        exports.qbx_core:AddMoney(src, pick.account, count, 'housekeeping-find')
+        return ('$%d'):format(count)
+    end
+
+    if not Inventory:CanCarryItem(src, pick.item, count) then
+        notify(src, locale('error.inventory_full'), 'error')
         return
     end
-    -- Optional safety: ensure player is near the mission ped
-    local pedPos = Config.StartPed or vector4(451.43, -1862.87, 27.79, 43.0)
-    local pedVec = vector3(pedPos.x, pedPos.y, pedPos.z)
-    local playerPed = GetPlayerPed(src)
-    if playerPed and playerPed ~= 0 then
-        local px, py, pz = table.unpack(GetEntityCoords(playerPed))
-        local dist = #(vector3(px, py, pz) - pedVec)
-        if dist > (Config.PaymentCollectDistance or 3.0) then
-            TriggerClientEvent('QBCore:Notify', src, 'Return to the foreman to collect your payment', 'error')
-            return
-        end
-    end
-    player.Functions.AddMoney('cash', pending, 'house-cleaning')
-    PendingPayouts[src] = 0
-    TriggerClientEvent('QBCore:Notify', src, ('Collected $%d in cleaning payments'):format(pending), 'success')
-end)
 
-RegisterNetEvent('gldnrmz-housekeeper:server:removeAdvancedLockpick', function()
-    local Player = QBCore.Functions.GetPlayer(source)
-    if not Player then return end
-    exports['qb-inventory']:RemoveItem(source, 'advancedlockpick', 1, false, 'gldnrmz-housekeeper:server:removeAdvancedLockpick')
-end)
-
-RegisterNetEvent('gldnrmz-housekeeper:server:removeLockpick', function()
-    local Player = QBCore.Functions.GetPlayer(source)
-    if not Player then return end
-    exports['qb-inventory']:RemoveItem(source, 'lockpick', 1, false, 'gldnrmz-housekeeper:server:removeLockpick')
-end)
-
-local function CheckVersion()
-	PerformHttpRequest('https://raw.githubusercontent.com/GLDNRMZ/'..GetCurrentResourceName()..'/main/version.txt', function(err, text, headers)
-		local currentVersion = GetResourceMetadata(GetCurrentResourceName(), 'version')
-		if not text then 
-			print('^1[GLDNRMZ] Unable to check version for '..GetCurrentResourceName()..'^0')
-			return 
-		end
-		local result = text:gsub("\r", ""):gsub("\n", "")
-		if result ~= currentVersion then
-			print('^1[GLDNRMZ] '..GetCurrentResourceName()..' is out of date! Latest: '..result..' | Current: '..currentVersion..'^0')
-		else
-			print('^2[GLDNRMZ] '..GetCurrentResourceName()..' is up to date! ('..currentVersion..')^0')
-		end
-	end)
+    if not Inventory:AddItem(src, pick.item, count) then return end
+    local data = Inventory:Items(pick.item)
+    return ('%dx %s'):format(count, data and data.label or pick.item)
 end
 
-Citizen.CreateThread(function()
-	-- CheckVersion()
+---------------------------------------------------------------------------
+-- Route lifecycle
+---------------------------------------------------------------------------
+
+lib.callback.register('gldnrmz-housekeeper:server:status', function(src)
+    local cid = getCitizenId(src)
+    local job = jobs[src]
+    return {
+        wages = cid and getWages(cid) or 0,
+        route = job and job.route,
+        house = job and job.house,
+    }
+end)
+
+---@return string|false route, string? errorKey
+lib.callback.register('gldnrmz-housekeeper:server:startRoute', function(src)
+    local cid = getCitizenId(src)
+    if not cid then return false end
+    if jobs[src] then return false, 'error.already_working' end
+    if not nearForeman(src) then
+        flag(src, 'start route away from foreman')
+        return false
+    end
+
+    local route = pickRoute(cid)
+    if not route then return false, 'error.no_routes' end
+
+    jobs[src] = { cid = cid, route = route, house = 1, inside = false, cleaned = {}, count = 0 }
+    lastRoute[cid] = route
+    return route
+end)
+
+lib.callback.register('gldnrmz-housekeeper:server:quitRoute', function(src)
+    jobs[src] = nil
+    return true
+end)
+
+---@return table<integer, true>|false cleaned
+lib.callback.register('gldnrmz-housekeeper:server:enterHouse', function(src, houseIndex)
+    local job = jobs[src]
+    if not job or job.house ~= houseIndex then return false end
+
+    if not isNear(src, currentHouse(job).coords, Config.DoorCheckDistance) then
+        flag(src, 'enter house away from door')
+        return false
+    end
+
+    -- Re-entering (after a crash, death or failed shell) keeps progress, so
+    -- spots can never be cleaned twice for the same house.
+    job.inside = true
+    job.cleaning = nil
+    return job.cleaned
+end)
+
+---@return { complete: boolean, next?: integer, bonus?: integer }|false
+lib.callback.register('gldnrmz-housekeeper:server:leaveHouse', function(src)
+    local job = jobs[src]
+    if not job or not job.inside or job.count < SPOT_COUNT then return false end
+
+    job.inside = false
+    job.cleaning = nil
+    job.cleaned = {}
+    job.count = 0
+    job.house += 1
+
+    if job.house <= #Config.Routes[job.route] then
+        return { complete = false, next = job.house }
+    end
+
+    local bonus = roll(Config.Payout.routeBonus)
+    addWages(job.cid, bonus)
+    jobs[src] = nil
+    return { complete = true, bonus = bonus }
+end)
+
+---------------------------------------------------------------------------
+-- Cleaning
+---------------------------------------------------------------------------
+
+---@return boolean ok, string? errorKey
+lib.callback.register('gldnrmz-housekeeper:server:startClean', function(src, spotIndex)
+    local job = jobs[src]
+    local spot = Config.Furniture[spotIndex]
+    if not job or not job.inside or not spot then return false end
+    if job.cleaned[spotIndex] then return false, 'error.already_clean' end
+    if job.cleaning then return false, 'error.busy' end
+
+    local spotCoords = currentHouse(job).coords - SHELL_OFFSET + spot.coords
+    if not isNear(src, spotCoords, Config.SpotCheckDistance) then
+        flag(src, ('clean spot %d out of range'):format(spotIndex))
+        return false
+    end
+
+    job.cleaning = { spot = spotIndex, finishAt = GetGameTimer() + Config.CleanDuration }
+    return true
+end)
+
+RegisterNetEvent('gldnrmz-housekeeper:server:cancelClean', function()
+    local job = jobs[source]
+    if job then job.cleaning = nil end
+end)
+
+---@return { count: integer, total: integer, pay: integer }|false
+lib.callback.register('gldnrmz-housekeeper:server:finishClean', function(src, spotIndex)
+    local job = jobs[src]
+    local cleaning = job and job.cleaning
+    if not cleaning or cleaning.spot ~= spotIndex then return false end
+
+    job.cleaning = nil
+    if GetGameTimer() + TIMING_GRACE < cleaning.finishAt then
+        flag(src, ('finished spot %d too early'):format(spotIndex))
+        return false
+    end
+
+    local spot = Config.Furniture[spotIndex]
+    job.cleaned[spotIndex] = true
+    job.count += 1
+
+    local pay = roll(Config.Payout.perSpot[spot.type] or Config.Payout.default)
+    addWages(job.cid, pay)
+
+    local found = giveLoot(src, spot.type)
+    if found then notify(src, locale('notify.found', found), 'success') end
+
+    return { count = job.count, total = SPOT_COUNT, pay = pay }
+end)
+
+---------------------------------------------------------------------------
+-- Pay
+---------------------------------------------------------------------------
+
+---@return integer|false amount, string? errorKey
+lib.callback.register('gldnrmz-housekeeper:server:collect', function(src)
+    local cid = getCitizenId(src)
+    if not cid then return false end
+    if not nearForeman(src) then
+        flag(src, 'collect wages away from foreman')
+        return false
+    end
+
+    local wages = getWages(cid)
+    if wages <= 0 then return false, 'error.no_wages' end
+
+    setWages(cid, 0)
+    if not exports.qbx_core:AddMoney(src, Config.Payout.account, wages, 'housekeeping-wages') then
+        setWages(cid, wages)
+        return false
+    end
+    return wages
+end)
+
+---------------------------------------------------------------------------
+-- Cleanup
+---------------------------------------------------------------------------
+
+AddEventHandler('playerDropped', function()
+    jobs[source] = nil
+end)
+
+AddEventHandler('qbx_core:server:playerLoggedOut', function(src)
+    jobs[src] = nil
 end)
