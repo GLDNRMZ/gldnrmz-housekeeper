@@ -55,6 +55,16 @@ Text is in `locales/en.json` (uses `ox:locale`).
 
 - Runs on Qbox, QBCore and ESX through community_bridge.
 
+## 📄 License
+
+**GLDNRMZ Script License** - see [LICENSE](LICENSE).
+
+- ✅ Run it on your own server and edit it for that server
+- ❌ Don't sell it, re-upload or share it (free or paid), or put it in a pack or server build
+- ❌ Don't remove the credits or claim it as your own
+
+Need something else, like a commercial license? Ask on [Discord](https://discord.gg/7YHJ7774jA).
+
 <!-- gldnrmz-links -->
 ---
 
