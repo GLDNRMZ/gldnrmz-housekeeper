@@ -22,7 +22,7 @@ Config.Foreman = {
 -- below are tuned for qb-interior's CreateHouseRobbery shell.
 Config.ShellZOffset = 45.0
 
-Config.InteractDistance = 1.5 -- ox_target distance for doors and spots
+Config.InteractDistance = 1.5 -- target distance for doors and spots
 Config.DoorCheckDistance = 5.0 -- server: max distance from the door to enter
 Config.SpotCheckDistance = 4.0 -- server: max distance from a spot to clean it
 
@@ -49,7 +49,7 @@ Config.Payout = {
 -- Loot found while cleaning
 ---------------------------------------------------------------------------
 -- Each entry rolls its own chance; if several hit, one of them is picked.
--- Use `item` for an ox_inventory item or `account` for money.
+-- Use `item` for an inventory item or `account` for money ('cash' / 'bank').
 local commonLoot = {
     { item = 'plastic',    amount = { min = 5, max = 10 },    chance = 25 },
     { item = 'rubber',     amount = { min = 5, max = 10 },    chance = 25 },

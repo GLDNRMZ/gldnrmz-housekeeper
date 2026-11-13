@@ -1,3 +1,6 @@
+-- Any target system (ox_target, qb-target, ...) through community_bridge
+local Target = exports.community_bridge:Target()
+
 -- House interior: shell, clutter props, cleaning spots and the exit door.
 local SHELL_OFFSET = vec3(0.0, 0.0, Config.ShellZOffset)
 local SPOT_COUNT = #Config.Furniture
@@ -8,7 +11,7 @@ local DOOR_DICT = 'anim@heists@keycard@'
 ---@field origin vector3
 ---@field objects integer[] shell entities from qb-interior
 ---@field exitZone? integer
----@field zones table<integer, integer> spot index -> ox_target zone
+---@field zones table<integer, string> spot index -> target zone name
 ---@field props table<integer, integer[]> spot index -> clutter entities
 ---@field cleaned table<integer, true>
 
@@ -75,7 +78,7 @@ end
 
 local function clearSpot(i)
     if not inside then return end
-    if inside.zones[i] then exports.ox_target:removeZone(inside.zones[i]) end
+    if inside.zones[i] then pcall(Target.RemoveZone, inside.zones[i]) end
     if inside.props[i] then deleteAll(inside.props[i]) end
     inside.zones[i], inside.props[i] = nil, nil
 end
@@ -86,8 +89,8 @@ local function teardown()
     if not state then return end
     inside = nil
 
-    if state.exitZone then exports.ox_target:removeZone(state.exitZone) end
-    for _, zone in pairs(state.zones) do exports.ox_target:removeZone(zone) end
+    if state.exitZone then pcall(Target.RemoveZone, state.exitZone) end
+    for _, zone in pairs(state.zones) do pcall(Target.RemoveZone, zone) end
     for _, props in pairs(state.props) do deleteAll(props) end
     deleteAll(state.objects)
     TriggerEvent('qb-weathersync:client:EnableSync')
@@ -256,29 +259,25 @@ function Housekeeper.enter(index, house)
         cleaned = cleaned,
     }
 
-    state.exitZone = exports.ox_target:addSphereZone({
-        coords = origin + vec3(exit.x, exit.y, exit.z),
-        radius = 0.75,
-        debug = Config.Debug,
-        options = {
-            {
-                name = 'housekeeper_leave',
-                icon = 'fa-solid fa-door-open',
-                label = locale('target.leave'),
-                distance = Config.InteractDistance,
-                canInteract = allClean,
-                onSelect = leave,
-            },
-            {
-                name = 'housekeeper_abandon',
-                icon = 'fa-solid fa-xmark',
-                label = locale('target.abandon'),
-                distance = Config.InteractDistance,
-                canInteract = function() return not allClean() end,
-                onSelect = Housekeeper.quitRoute,
-            },
+    state.exitZone = 'housekeeper_exit'
+    Target.AddSphereZone(state.exitZone, origin + vec3(exit.x, exit.y, exit.z), 0.75, {
+        {
+            name = 'housekeeper_leave',
+            icon = 'fa-solid fa-door-open',
+            label = locale('target.leave'),
+            distance = Config.InteractDistance,
+            canInteract = allClean,
+            onSelect = leave,
         },
-    })
+        {
+            name = 'housekeeper_abandon',
+            icon = 'fa-solid fa-xmark',
+            label = locale('target.abandon'),
+            distance = Config.InteractDistance,
+            canInteract = function() return not allClean() end,
+            onSelect = Housekeeper.quitRoute,
+        },
+    }, Config.Debug)
 
     local remaining = 0
     for i, spot in ipairs(Config.Furniture) do
@@ -286,21 +285,17 @@ function Housekeeper.enter(index, house)
             remaining += 1
             local pos = origin + spot.coords
             state.props[i] = spawnClutter(spot, pos)
-            state.zones[i] = exports.ox_target:addSphereZone({
-                coords = pos,
-                radius = 0.5,
-                debug = Config.Debug,
-                options = {
-                    {
-                        name = ('housekeeper_spot_%d'):format(i),
-                        icon = 'fa-solid fa-broom',
-                        label = spot.label,
-                        distance = Config.InteractDistance,
-                        canInteract = function() return not busy end,
-                        onSelect = function() clean(i) end,
-                    },
+            state.zones[i] = ('housekeeper_spot_%d'):format(i)
+            Target.AddSphereZone(state.zones[i], pos, 0.5, {
+                {
+                    name = state.zones[i],
+                    icon = 'fa-solid fa-broom',
+                    label = spot.label,
+                    distance = Config.InteractDistance,
+                    canInteract = function() return not busy end,
+                    onSelect = function() clean(i) end,
                 },
-            })
+            }, Config.Debug)
         end
     end
 

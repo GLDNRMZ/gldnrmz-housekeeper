@@ -2,7 +2,9 @@
 -- tracks each player's route and checks position, order and timing before
 -- paying anything.
 local RESOURCE = cache.resource
-local Inventory = exports.ox_inventory
+-- Qbox / QBCore / ESX and any inventory through community_bridge
+local Framework = exports.community_bridge:Framework()
+local Inventory = exports.community_bridge:Inventory()
 
 local TIMING_GRACE = 750 -- ms of network slack allowed when finishing a spot
 local SPOT_COUNT = #Config.Furniture
@@ -47,8 +49,8 @@ end
 
 ---@return string?
 local function getCitizenId(src)
-    local player = exports.qbx_core:GetPlayer(src)
-    return player and player.PlayerData.citizenid
+    local ok, cid = pcall(Framework.GetPlayerIdentifier, src)
+    return ok and cid or nil
 end
 
 local function isNear(src, coords, range)
@@ -122,17 +124,17 @@ local function giveLoot(src, spotType)
     local count = roll(pick.amount or { min = 1, max = 1 })
 
     if pick.account then
-        exports.qbx_core:AddMoney(src, pick.account, count, 'housekeeping-find')
+        Framework.AddAccountBalance(src, pick.account, count)
         return ('$%d'):format(count)
     end
 
-    if not Inventory:CanCarryItem(src, pick.item, count) then
+    if not Inventory.CanCarryItem(src, pick.item, count) then
         notify(src, locale('error.inventory_full'), 'error')
         return
     end
 
-    if not Inventory:AddItem(src, pick.item, count) then return end
-    local data = Inventory:Items(pick.item)
+    if not Inventory.AddItem(src, pick.item, count) then return end
+    local data = Inventory.GetItemInfo(pick.item)
     return ('%dx %s'):format(count, data and data.label or pick.item)
 end
 
@@ -280,7 +282,7 @@ lib.callback.register('gldnrmz-housekeeper:server:collect', function(src)
     if wages <= 0 then return false, 'error.no_wages' end
 
     setWages(cid, 0)
-    if not exports.qbx_core:AddMoney(src, Config.Payout.account, wages, 'housekeeping-wages') then
+    if not Framework.AddAccountBalance(src, Config.Payout.account, wages) then
         setWages(cid, wages)
         return false
     end
@@ -295,6 +297,6 @@ AddEventHandler('playerDropped', function()
     jobs[source] = nil
 end)
 
-AddEventHandler('qbx_core:server:playerLoggedOut', function(src)
+AddEventHandler('community_bridge:Server:OnPlayerUnload', function(src)
     jobs[src] = nil
 end)

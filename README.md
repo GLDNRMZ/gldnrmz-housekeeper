@@ -1,6 +1,6 @@
 # gldnrmz-housekeeper
 
-House cleaning job for Qbox. Talk to the foreman, get a route of houses, clean every spot in each one, then collect your wages.
+House cleaning job for Qbox, QBCore and ESX (through community_bridge). Talk to the foreman, get a route of houses, clean every spot in each one, then collect your wages.
 
 ## Features
 
@@ -15,10 +15,8 @@ House cleaning job for Qbox. Talk to the foreman, get a route of houses, clean e
 
 ## Dependencies
 
-- [qbx_core](https://github.com/Qbox-project/qbx_core)
+- [community_bridge](https://github.com/TheOrderFivem/community_bridge) (with Qbox, QBCore or ESX and a supported target / inventory)
 - [ox_lib](https://github.com/overextended/ox_lib)
-- [ox_target](https://github.com/overextended/ox_target)
-- [ox_inventory](https://github.com/overextended/ox_inventory)
 - [qb-interior](https://github.com/qbcore-framework/qb-interior) (house shell)
 - Optional: interact-sound (door sound) and any weather sync that handles `qb-weathersync:client:DisableSync` / `EnableSync` (Renewed-Weathersync does)
 

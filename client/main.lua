@@ -1,3 +1,6 @@
+-- Any target system (ox_target, qb-target, ...) through community_bridge
+local Target = exports.community_bridge:Target()
+
 -- Foreman NPC and route tracking. House interiors live in client/house.lua.
 Housekeeper = {}
 
@@ -22,7 +25,7 @@ end
 
 local function clearMarker()
     if houseBlip and DoesBlipExist(houseBlip) then RemoveBlip(houseBlip) end
-    if doorZone then exports.ox_target:removeZone(doorZone) end
+    if doorZone then pcall(Target.RemoveZone, doorZone) end
     houseBlip, doorZone = nil, nil
 end
 
@@ -45,21 +48,17 @@ function Housekeeper.setHouse(index)
     AddTextComponentSubstringPlayerName(locale('blip.house'))
     EndTextCommandSetBlipName(houseBlip)
 
-    doorZone = exports.ox_target:addSphereZone({
-        coords = c,
-        radius = 1.0,
-        debug = Config.Debug,
-        options = {
-            {
-                name = 'housekeeper_enter',
-                icon = 'fa-solid fa-broom',
-                label = locale('target.enter'),
-                distance = Config.InteractDistance,
-                canInteract = function() return not Housekeeper.isInside() end,
-                onSelect = function() Housekeeper.enter(index, house) end,
-            },
+    doorZone = 'housekeeper_door'
+    Target.AddSphereZone(doorZone, c, 1.0, {
+        {
+            name = 'housekeeper_enter',
+            icon = 'fa-solid fa-broom',
+            label = locale('target.enter'),
+            distance = Config.InteractDistance,
+            canInteract = function() return not Housekeeper.isInside() end,
+            onSelect = function() Housekeeper.enter(index, house) end,
         },
-    })
+    }, Config.Debug)
 
     Housekeeper.notify(locale('notify.next_house', house.label, index, #job.houses))
 end
@@ -148,7 +147,7 @@ end
 
 local function despawn()
     if ped and DoesEntityExist(ped) then
-        exports.ox_target:removeLocalEntity(ped)
+        pcall(Target.RemoveLocalEntity, ped)
         DeleteEntity(ped)
     end
     ped = nil
@@ -171,7 +170,7 @@ local function spawn()
     SetPedCanBeTargetted(ped, false)
     if foreman.scenario then TaskStartScenarioInPlace(ped, foreman.scenario, 0, true) end
 
-    exports.ox_target:addLocalEntity(ped, {
+    Target.AddLocalEntity(ped, {
         {
             name = 'housekeeper_foreman',
             icon = 'fa-solid fa-comments',
@@ -205,7 +204,7 @@ end
 -- Cleanup
 ---------------------------------------------------------------------------
 
-RegisterNetEvent('qbx_core:client:playerLoggedOut', function()
+AddEventHandler('community_bridge:Client:OnPlayerUnload', function()
     if Housekeeper.isInside() then Housekeeper.exitShell(true) end
     Housekeeper.endJob()
 end)
