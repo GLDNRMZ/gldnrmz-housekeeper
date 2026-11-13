@@ -15,10 +15,16 @@ House cleaning job for Qbox, QBCore and ESX (through community_bridge). Talk to 
 
 ## Dependencies
 
-- [community_bridge](https://github.com/TheOrderFivem/community_bridge) (with Qbox, QBCore or ESX and a supported target / inventory)
+- [community_bridge](https://github.com/TheOrderFivem/community_bridge) **0.13.6+** (with Qbox, QBCore or ESX and a supported target / inventory)
 - [ox_lib](https://github.com/overextended/ox_lib)
-- [qb-interior](https://github.com/qbcore-framework/qb-interior) (house shell)
+- [qb-interior](https://github.com/qbcore-framework/qb-interior) (house shell). It doesn't need qb-core, so install it on Qbox and ESX servers too.
 - Optional: interact-sound (door sound) and any weather sync that handles `qb-weathersync:client:DisableSync` / `EnableSync` (Renewed-Weathersync does)
+
+## Installation
+
+1. Install `qb-interior` and start it, `ox_lib` and `community_bridge` before this resource.
+2. Add `ensure gldnrmz-housekeeper` to `server.cfg`.
+3. If you use `Config.Loot` items, add them to your inventory's item list.
 
 ## Configuration
 
@@ -44,3 +50,7 @@ Everything is in `config.lua`:
 4. Add it to `Config.Furniture`.
 
 Text is in `locales/en.json` (uses `ox:locale`).
+
+## Changes in 2.1.0
+
+- Runs on Qbox, QBCore and ESX through community_bridge.
